@@ -411,7 +411,15 @@ function availableRanges() {
 
 // Stable colors per attribution category; unknown keys fall back to the palette.
 const PALETTE = ["#5b8cff", "#43c59e", "#e0a458", "#e0586b", "#9d7bff", "#4dd0e1", "#c2cc4d"];
-const TRIGGER_COLORS = { user: "#5b8cff", ambient: "#e0a458", memory: "#43c59e", background: "#6b7280", unknown: "#8b93a3" };
+const TRIGGER_COLORS = {
+  user: "#5b8cff",
+  user_driven_agent: "#9d7bff",
+  agent: "#4dd0e1",
+  ambient: "#e0a458",
+  memory: "#43c59e",
+  background: "#6b7280",
+  unknown: "#8b93a3"
+};
 const TYPE_COLORS = { uncached_input: "#56b4e9", cached_input: "#e69f00", output: "#009e73" };
 const CLAUDE_TYPE_ORDER = ["input", "output", "cache_read", "cache_creation"];
 const CLAUDE_TYPE_COLORS = { input: "#56b4e9", output: "#009e73", cache_read: "#f0e442", cache_creation: "#d55e00" };

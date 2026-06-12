@@ -41,6 +41,7 @@ attributes.cache_creation_tokens
 attributes.cache_read_tokens
 attributes.output_tokens
 attributes.cost_usd
+attributes.prompt.id
 attributes.query_source
 attributes.agent.name
 ```
@@ -167,10 +168,18 @@ https://developers.openai.com/codex/speed
 
 Each annotated row gets a `trigger`:
 
-- `user`: `conversation.id` exists in `state_5.threads`
-- `ambient`: not a known user thread, and `logs_2` contains ambient suggestion signatures
-- `memory`: not a known user thread, and `logs_2` contains memory signatures
-- `background`: no thread id, no local match, or lookup unavailable
+- `user`: direct user request. For Codex this means `conversation.id` exists in
+  `state_5.threads`; for Claude this is the non-agent default.
+- `user_driven_agent`: Claude Code helper work tied to a user action, such as
+  `generate_session_title`, or an agent `api_request` whose `prompt.id` has a
+  matching `user_prompt` raw event.
+- `agent`: Claude Code agent work without a matching `user_prompt` for the same
+  `prompt.id`.
+- `ambient`: Codex turn is not a known user thread, and `logs_2` contains
+  ambient suggestion signatures.
+- `memory`: Codex turn is not a known user thread, and `logs_2` contains memory
+  signatures.
+- `background`: no Codex thread id, no local match, or lookup unavailable.
 
 Current signatures:
 

@@ -110,6 +110,37 @@ class AnnotateJobFeatureFlagsTest {
     }
 
     @Test
+    void classifiesClaudeAgentWithUserPromptAsUserDrivenAgent() {
+        insertClaudeUserPrompt(20, "prompt-agent-user");
+        insertClaudeApiRequest(21, "claude-agent-user", "prompt-agent-user",
+                "agent:builtin:workflow-subagent", "workflow-subagent");
+
+        annotateJob.run();
+
+        assertEquals("user_driven_agent", triggerByRequest("claude-agent-user"));
+    }
+
+    @Test
+    void classifiesClaudeAgentWithoutUserPromptAsAgent() {
+        insertClaudeApiRequest(30, "claude-agent-background", "prompt-agent-background",
+                "agent:builtin:workflow-subagent", "workflow-subagent");
+
+        annotateJob.run();
+
+        assertEquals("agent", triggerByRequest("claude-agent-background"));
+    }
+
+    @Test
+    void classifiesClaudeGeneratedSessionTitleAsUserDrivenAgent() {
+        insertClaudeApiRequest(40, "claude-title", "prompt-title",
+                "generate_session_title", null);
+
+        annotateJob.run();
+
+        assertEquals("user_driven_agent", triggerByRequest("claude-title"));
+    }
+
+    @Test
     void configEndpointReflectsFeatureFlags() {
         given()
                 .when().get("/api/config")
@@ -129,6 +160,52 @@ class AnnotateJobFeatureFlagsTest {
                 .update();
     }
 
+    private void insertClaudeUserPrompt(long id, String promptId) {
+        insertRaw(id, """
+                {
+                  "observed_time_unix_nano": 1781208000000000000,
+                  "body": "claude_code.user_prompt",
+                  "attributes": {
+                    "event.name": "user_prompt",
+                    "session.id": "claude-session-prompt",
+                    "prompt.id": "%s"
+                  },
+                  "resource_attributes": {
+                    "service.name": "claude-code",
+                    "host.name": "test-host"
+                  }
+                }
+                """.formatted(promptId));
+    }
+
+    private void insertClaudeApiRequest(long id, String requestId, String promptId, String querySource, String agentName) {
+        String agentJson = agentName == null ? "" : """
+                    ,
+                    "agent.name": "%s"
+                """.formatted(agentName);
+        insertRaw(id, """
+                {
+                  "observed_time_unix_nano": 1781208060000000000,
+                  "body": "api_request",
+                  "attributes": {
+                    "event.name": "api_request",
+                    "request_id": "%s",
+                    "session.id": "claude-session-agent",
+                    "prompt.id": "%s",
+                    "model": "claude-fable-5",
+                    "input_tokens": 200,
+                    "cache_read_tokens": 50,
+                    "output_tokens": 25,
+                    "query_source": "%s"%s
+                  },
+                  "resource_attributes": {
+                    "service.name": "claude-code",
+                    "host.name": "test-host"
+                  }
+                }
+                """.formatted(requestId, promptId, querySource, agentJson));
+    }
+
     private int countBySource(String sourceTool) {
         return db.sql("""
                 SELECT count(*) FROM annotated_events
@@ -136,6 +213,16 @@ class AnnotateJobFeatureFlagsTest {
                 """)
                 .param("source_tool", sourceTool)
                 .query((rs, row) -> rs.getInt(1))
+                .single();
+    }
+
+    private String triggerByRequest(String requestId) {
+        return db.sql("""
+                SELECT trigger FROM annotated_events
+                WHERE request_id = :request_id
+                """)
+                .param("request_id", requestId)
+                .query((rs, row) -> rs.getString(1))
                 .single();
     }
 

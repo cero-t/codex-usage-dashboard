@@ -175,6 +175,36 @@ public class SchemaInitializer {
                    OR json_extract(attributes_json, '$.cache_read_tokens') IS NOT NULL)
             """;
 
+    private static final String BACKFILL_CLAUDE_TRIGGERS = """
+            WITH user_prompts(prompt_id) AS MATERIALIZED (
+              SELECT DISTINCT json_extract(record_json, '$.attributes."prompt.id"')
+              FROM otel_log_records
+              WHERE (
+                  json_extract(record_json, '$.attributes."event.name"') = 'user_prompt'
+                  OR json_extract(record_json, '$.body') = 'claude_code.user_prompt'
+                )
+                AND json_extract(record_json, '$.attributes."prompt.id"') IS NOT NULL
+            )
+            UPDATE annotated_events
+            SET trigger = CASE
+                WHEN json_extract(attributes_json, '$.query_source') = 'generate_session_title'
+                  THEN 'user_driven_agent'
+                WHEN json_extract(attributes_json, '$."agent.name"') IS NOT NULL
+                     OR json_extract(attributes_json, '$.query_source') LIKE 'agent:%'
+                  THEN CASE
+                    WHEN EXISTS (
+                      SELECT 1 FROM user_prompts
+                      WHERE user_prompts.prompt_id = json_extract(annotated_events.attributes_json, '$."prompt.id"')
+                    )
+                    THEN 'user_driven_agent'
+                    ELSE 'agent'
+                  END
+                ELSE 'user'
+              END
+            WHERE COALESCE(source_tool, 'codex') = 'claude'
+              AND attributes_json IS NOT NULL
+            """;
+
     private static final String DELETE_DUPLICATE_ANNOTATED_EVENTS = """
             DELETE FROM annotated_events
             WHERE id NOT IN (
@@ -224,6 +254,7 @@ public class SchemaInitializer {
                 .param("usd_per_credit", CODEX_USD_PER_CREDIT)
                 .update();
         db.sql(BACKFILL_CLAUDE_INPUT_TOTALS).update();
+        db.sql(BACKFILL_CLAUDE_TRIGGERS).update();
         db.sql(DELETE_DUPLICATE_ANNOTATED_EVENTS).update();
         db.sql(ANNOTATED_SOURCE_UNIQUE_INDEX).update();
         db.sql(ANNOTATED_EVENT_TIME_INDEX).update();

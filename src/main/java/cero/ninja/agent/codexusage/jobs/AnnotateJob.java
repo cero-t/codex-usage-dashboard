@@ -80,6 +80,16 @@ public class AnnotateJob {
             LIMIT 1
             """;
 
+    private static final String SELECT_CLAUDE_USER_PROMPT = """
+            SELECT 1 FROM otel_log_records
+            WHERE json_extract(record_json, '$.attributes."prompt.id"') = :prompt_id
+              AND (
+                json_extract(record_json, '$.attributes."event.name"') = 'user_prompt'
+                OR json_extract(record_json, '$.body') = 'claude_code.user_prompt'
+              )
+            LIMIT 1
+            """;
+
     @Inject
     JdbcClient db;
 
@@ -121,6 +131,7 @@ public class AnnotateJob {
 
         Map<String, Optional<CodexDb.ThreadInfo>> threadCache = new HashMap<>();
         Map<String, String> triggerCache = new HashMap<>();
+        Map<String, Boolean> claudeUserPromptCache = new HashMap<>();
         long lastId = cursor;
         long failedId = -1;
         int processed = 0;
@@ -128,7 +139,7 @@ public class AnnotateJob {
         try (CodexConnections connections = new CodexConnections()) {
             for (RawRow row : rows) {
                 try {
-                    if (annotateOne(row, connections, threadCache, triggerCache)) {
+                    if (annotateOne(row, connections, threadCache, triggerCache, claudeUserPromptCache)) {
                         annotated++;
                     }
                     lastId = row.id();
@@ -161,7 +172,8 @@ public class AnnotateJob {
             RawRow row,
             CodexConnections connections,
             Map<String, Optional<CodexDb.ThreadInfo>> threadCache,
-            Map<String, String> triggerCache
+            Map<String, String> triggerCache,
+            Map<String, Boolean> claudeUserPromptCache
     ) throws Exception {
         JsonNode root = objectMapper.readTree(row.recordJson());
         JsonNode attrs = root.path("attributes");
@@ -171,7 +183,7 @@ public class AnnotateJob {
             if (!claudeEnabled) {
                 return false;
             }
-            return annotateClaude(row, root, attrs, resource);
+            return annotateClaude(row, root, attrs, resource, claudeUserPromptCache);
         }
 
         if (!codexEnabled) {
@@ -256,7 +268,13 @@ public class AnnotateJob {
                 .update() > 0;
     }
 
-    private boolean annotateClaude(RawRow row, JsonNode root, JsonNode attrs, JsonNode resource) {
+    private boolean annotateClaude(
+            RawRow row,
+            JsonNode root,
+            JsonNode attrs,
+            JsonNode resource,
+            Map<String, Boolean> claudeUserPromptCache
+    ) {
         String rawEvent = firstNonBlank(optString(attrs, "event.name"), optString(root, "body"));
         String eventName = rawEvent == null ? null : "claude." + rawEvent.replaceFirst("^claude_code\\.", "");
         String requestId = optString(attrs, "request_id");
@@ -288,6 +306,7 @@ public class AnnotateJob {
         Double costUsd = costs == null ? reportedCostUsd : Double.valueOf(costs.total());
         String querySource = optString(attrs, "query_source");
         String agentName = optString(attrs, "agent.name");
+        String promptId = optString(attrs, "prompt.id");
         String serviceName = optString(resource, "service.name");
 
         return db.sql(INSERT_ANNOTATED)
@@ -320,7 +339,8 @@ public class AnnotateJob {
                 .param("cache_read_cost_usd", costs == null ? null : costs.cacheRead())
                 .param("output_cost_usd", costs == null ? null : costs.output())
                 .param("reported_cost_usd", reportedCostUsd)
-                .param("trigger", classifyClaudeTrigger(querySource, agentName))
+                .param("trigger", classifyClaudeTrigger(querySource, agentName,
+                        claudeHasUserPrompt(promptId, claudeUserPromptCache)))
                 .param("originator", firstNonBlank(agentName, querySource))
                 .param("host", optString(resource, "host.name"))
                 .param("attributes_json", attrs.isMissingNode() ? null : attrs.toString())
@@ -345,12 +365,23 @@ public class AnnotateJob {
         return body != null && (body.startsWith("claude_code.") || body.equals("api_request") || body.equals("api_error"));
     }
 
-    private static String classifyClaudeTrigger(String querySource, String agentName) {
-        if (agentName != null || (querySource != null && querySource.startsWith("agent:"))) {
-            return "background";
+    private boolean claudeHasUserPrompt(String promptId, Map<String, Boolean> cache) {
+        if (promptId == null || promptId.isBlank()) {
+            return false;
         }
+        return cache.computeIfAbsent(promptId, pid -> db.sql(SELECT_CLAUDE_USER_PROMPT)
+                .param("prompt_id", pid)
+                .query((rs, row) -> true)
+                .optional()
+                .orElse(false));
+    }
+
+    private static String classifyClaudeTrigger(String querySource, String agentName, boolean hasUserPrompt) {
         if ("generate_session_title".equals(querySource)) {
-            return "background";
+            return "user_driven_agent";
+        }
+        if (agentName != null || (querySource != null && querySource.startsWith("agent:"))) {
+            return hasUserPrompt ? "user_driven_agent" : "agent";
         }
         return "user";
     }
