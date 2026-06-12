@@ -149,7 +149,9 @@ Then open `http://<machine-ip>:4318/` from another device.
 
 ## Configuration
 
-Useful environment variables:
+Quarkus reads a `.env` file from the working directory. See
+[`.env.example`](.env.example) for copyable defaults. Useful environment
+variables:
 
 ```sh
 # Ports / bind addresses
@@ -165,7 +167,28 @@ QUARKUS_DATASOURCE_JDBC_URL='jdbc:sqlite:data/codex-usage-dashboard.sqlite?journ
 CODEX_STATE5_PATH="$HOME/.codex/state_5.sqlite"
 CODEX_LOGS2_PATH="$HOME/.codex/logs_2.sqlite"
 CODEX_BIN=codex
+
+# Local telemetry retention
+CODEX_USAGE_DASHBOARD_RETENTION_EVERY=1h
+CODEX_USAGE_DASHBOARD_RETENTION_OTEL_LOG_RECORDS=14d
+CODEX_USAGE_DASHBOARD_RETENTION_ANNOTATED_EVENTS=365d
+CODEX_USAGE_DASHBOARD_RETENTION_USAGE_SAMPLES=365d
 ```
+
+Retention is enforced independently for the tables owned by this app:
+
+- `otel_log_records`: raw OTLP log records. These are the largest rows and back
+  the raw event drill-down. Old raw rows are deleted only after the annotation
+  cursor has passed them, so unprocessed backlog is preserved.
+- `annotated_events`: parsed Codex and Claude Code token, cost, trigger, and
+  error rows used by the dashboard charts and tables.
+- `usage_samples`: periodic Codex rate-limit percentage snapshots.
+
+Set any retention value to `0` or `disabled` to keep that table indefinitely.
+Deleting raw OTLP rows does not remove already annotated chart history, but raw
+drill-down and annotation replay are unavailable for rows whose raw source was
+deleted. SQLite may reuse freed pages without immediately shrinking the database
+file; run `VACUUM` manually if you need to compact the file on disk.
 
 ## OTLP Support
 

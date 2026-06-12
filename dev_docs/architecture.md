@@ -116,13 +116,28 @@ Tables:
 - `usage_samples`: point-in-time rate-limit snapshots
 - `cursor`: forward cursor state
 
+Retention:
+
+- `codex-usage-dashboard.retention.otel-log-records=14d` deletes old raw OTLP
+  rows by `received_at`, but only when `id <= cursor['annotate_log_id']`.
+  Unprocessed raw backlog is never deleted by retention.
+- `codex-usage-dashboard.retention.annotated-events=365d` deletes old derived
+  Codex and Claude Code rows by event time, falling back to `annotated_at` when
+  `time_unix_nano` is missing or zero.
+- `codex-usage-dashboard.retention.usage-samples=365d` deletes old Codex
+  rate-limit snapshots by `sampled_at`.
+- `codex-usage-dashboard.retention.every=1h` controls the cleanup cadence. Any
+  table retention value can be `0` or `disabled` to keep that table indefinitely.
+
 Important indexes:
 
-- `idx_annotated_events_source`: raw-to-derived join
+- `idx_annotated_events_source_unique`: raw-to-derived uniqueness
 - `idx_annotated_events_event_epoch`: dashboard time filtering
 - `idx_annotated_events_credit_epoch`: credit time filtering
 - `idx_annotated_events_source_request`: Claude Code request-id dedupe
+- `idx_otel_log_records_received_at`: raw-log retention cutoff
 - `idx_usage_samples_window_sampled`: usage history by window/time
+- `idx_usage_samples_sampled_at`: usage retention cutoff
 
 ## Dashboard
 

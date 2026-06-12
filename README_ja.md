@@ -122,6 +122,8 @@ QUARKUS_GRPC_SERVER_HOST=0.0.0.0 \
 
 ## 設定
 
+Quarkus は作業ディレクトリの `.env` ファイルを読みます。
+コピーして使える既定値は [`.env.example`](.env.example) にあります。
 よく使う環境変数:
 
 ```sh
@@ -138,7 +140,25 @@ QUARKUS_DATASOURCE_JDBC_URL='jdbc:sqlite:data/codex-usage-dashboard.sqlite?journ
 CODEX_STATE5_PATH="$HOME/.codex/state_5.sqlite"
 CODEX_LOGS2_PATH="$HOME/.codex/logs_2.sqlite"
 CODEX_BIN=codex
+
+# ローカルテレメトリの保持期間
+CODEX_USAGE_DASHBOARD_RETENTION_EVERY=1h
+CODEX_USAGE_DASHBOARD_RETENTION_OTEL_LOG_RECORDS=14d
+CODEX_USAGE_DASHBOARD_RETENTION_ANNOTATED_EVENTS=365d
+CODEX_USAGE_DASHBOARD_RETENTION_USAGE_SAMPLES=365d
 ```
+
+保持期間は、このアプリが持つテーブルごとに独立して適用されます。
+
+- `otel_log_records`: 生の OTLP log レコードです。最も大きくなりやすく、生ログのドリルダウンにも使います。未処理の backlog を失わないよう、annotation cursor が通過した行だけ削除します。
+- `annotated_events`: Codex / Claude Code のトークン数、コスト、trigger、エラーを正規化した行です。ダッシュボードのチャートや一覧に使います。
+- `usage_samples`: Codex 利用枠の割合を定期取得したスナップショットです。
+
+各保持期間は `0` または `disabled` にすると無期限保持になります。
+生の OTLP 行を削除しても、すでに annotation 済みのチャート履歴は残ります。
+ただし、その行の生ログドリルダウンと annotation replay はできなくなります。
+SQLite は削除済み領域を再利用しますが、ファイルサイズがすぐ縮むとは限りません。
+ディスク上のファイルを縮めたい場合は手動で `VACUUM` を実行してください。
 
 ## OTLP サポート
 

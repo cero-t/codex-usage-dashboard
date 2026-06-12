@@ -38,6 +38,11 @@ public class SchemaInitializer {
             )
             """;
 
+    private static final String RAW_RECEIVED_AT_INDEX = """
+            CREATE INDEX IF NOT EXISTS idx_otel_log_records_received_at
+            ON otel_log_records(received_at)
+            """;
+
     private static final String ANNOTATED_TABLE = """
             CREATE TABLE IF NOT EXISTS annotated_events (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,6 +121,11 @@ public class SchemaInitializer {
     private static final String USAGE_WINDOW_TIME_INDEX = """
             CREATE INDEX IF NOT EXISTS idx_usage_samples_window_sampled
             ON usage_samples(window, sampled_at)
+            """;
+
+    private static final String USAGE_SAMPLED_AT_INDEX = """
+            CREATE INDEX IF NOT EXISTS idx_usage_samples_sampled_at
+            ON usage_samples(sampled_at)
             """;
 
     private static final String CURSOR_TABLE = """
@@ -219,7 +229,9 @@ public class SchemaInitializer {
         db.sql(ANNOTATED_EVENT_TIME_INDEX).update();
         db.sql(ANNOTATED_CREDIT_TIME_INDEX).update();
         db.sql(ANNOTATED_REQUEST_INDEX).update();
+        db.sql(RAW_RECEIVED_AT_INDEX).update();
         db.sql(USAGE_WINDOW_TIME_INDEX).update();
+        db.sql(USAGE_SAMPLED_AT_INDEX).update();
     }
 
     private void ensureColumn(String table, String column, String type) {

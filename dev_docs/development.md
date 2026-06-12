@@ -140,8 +140,8 @@ accepted by the receiver but discarded.
 
 ## Database Replay
 
-Raw records are the source of truth. To replay derived rows after changing
-annotation logic:
+Raw records are the short-term source of truth. To replay derived rows after
+changing annotation logic:
 
 ```sql
 DELETE FROM annotated_events;
@@ -152,6 +152,11 @@ Then let the annotate job run again.
 
 Per-row annotate exceptions stop the pass before the failing row, so parser or
 DB bugs remain replayable after the fix is deployed.
+
+Retention can remove old rows from `otel_log_records` after the annotate cursor
+has passed them. Derived chart history can remain in `annotated_events`, but
+rows whose raw source was deleted cannot be replayed and `/api/events/{id}/raw`
+will return 404.
 
 ## Release Hygiene
 
