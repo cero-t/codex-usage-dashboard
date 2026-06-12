@@ -11,21 +11,28 @@ import io.opentelemetry.proto.common.v1.KeyValueList;
 import io.opentelemetry.proto.logs.v1.LogRecord;
 import io.opentelemetry.proto.logs.v1.ResourceLogs;
 import io.opentelemetry.proto.logs.v1.ScopeLogs;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
- * Receive-path sink. Stores every OTLP log record verbatim as JSON, with no
- * filtering and no interpretation beyond the mechanical protobuf -> JSON
- * conversion. All parsing, filtering and enrichment is deferred to the annotate
- * job, so a parse bug never costs us raw data and can be re-run by rewinding the
- * cursor.
+ * Receive-path sink. Stores OTLP log records verbatim as JSON, with no
+ * interpretation beyond the mechanical protobuf -> JSON conversion. All parsing
+ * and enrichment is deferred to the annotate job, so a parse bug never costs us
+ * raw data and can be re-run by rewinding the cursor.
+ *
+ * <p>The one exception is high-volume streaming noise: records whose
+ * {@code event.kind} matches the drop pattern (by default codex
+ * {@code response.*.delta} chunks) carry no token usage and are discarded at
+ * receive time, before they reach storage.
  */
 @ApplicationScoped
 public class RawLogStore {
@@ -39,18 +46,41 @@ public class RawLogStore {
     @Inject
     ObjectMapper objectMapper;
 
+    @ConfigProperty(name = "codex-usage-dashboard.ingest.drop-event-kinds", defaultValue = "^response\\..+\\.delta$")
+    String dropEventKinds;
+
+    private Pattern dropEventKindsPattern;
+
+    @PostConstruct
+    void init() {
+        dropEventKindsPattern = Pattern.compile(dropEventKinds);
+    }
+
     public void store(ExportLogsServiceRequest request) {
         for (ResourceLogs resourceLogs : request.getResourceLogsList()) {
             Map<String, Object> resourceAttributes = attributes(resourceLogs.getResource().getAttributesList());
             for (ScopeLogs scopeLogs : resourceLogs.getScopeLogsList()) {
                 String scopeName = scopeLogs.getScope().getName();
                 for (LogRecord record : scopeLogs.getLogRecordsList()) {
+                    if (shouldDrop(record)) {
+                        continue;
+                    }
                     db.sql(INSERT_SQL)
                             .param("record_json", json(toEnvelope(scopeName, resourceAttributes, record)))
                             .update();
                 }
             }
         }
+    }
+
+    private boolean shouldDrop(LogRecord record) {
+        for (KeyValue attr : record.getAttributesList()) {
+            if ("event.kind".equals(attr.getKey())) {
+                String kind = attr.getValue().getStringValue();
+                return kind != null && dropEventKindsPattern.matcher(kind).matches();
+            }
+        }
+        return false;
     }
 
     private Map<String, Object> toEnvelope(
